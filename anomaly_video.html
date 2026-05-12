@@ -1,0 +1,1040 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>StampedeShield — Live Anomaly Visualizer</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Rajdhani:wght@400;500;600;700&display=swap');
+
+:root {
+  --bg:      #080c12;
+  --surface: #0d1117;
+  --panel:   #111820;
+  --border:  #1e2d3d;
+  --safe:    #00ff88;
+  --warn:    #ffcc00;
+  --danger:  #ff6600;
+  --crit:    #ff1744;
+  --blue:    #00aaff;
+  --purple:  #9b5de5;
+  --text:    #e8f4f8;
+  --muted:   #4a6272;
+  --mono:    'Space Mono', monospace;
+  --head:    'Rajdhani', sans-serif;
+}
+
+* { margin:0; padding:0; box-sizing:border-box; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--head);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Scanline effect */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg, transparent, transparent 2px,
+    rgba(0,255,136,0.015) 2px, rgba(0,255,136,0.015) 4px
+  );
+  pointer-events: none;
+  z-index: 9999;
+}
+
+/* ── HEADER ── */
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1.5rem;
+  border-bottom: 1px solid var(--border);
+  background: rgba(13,17,23,0.95);
+  backdrop-filter: blur(20px);
+  position: sticky; top: 0; z-index: 100;
+}
+
+.logo {
+  display: flex; align-items: center; gap: 0.6rem;
+  font-family: var(--head); font-size: 1.3rem; font-weight: 700;
+  letter-spacing: 0.05em; text-transform: uppercase;
+}
+.logo-shield {
+  width: 32px; height: 32px; background: var(--crit);
+  clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.8rem;
+  animation: shield-pulse 2s infinite;
+}
+@keyframes shield-pulse {
+  0%,100% { box-shadow: 0 0 0 0 rgba(255,23,68,0.4); }
+  50%      { box-shadow: 0 0 0 8px rgba(255,23,68,0); }
+}
+.logo span { color: var(--crit); }
+
+.sys-status {
+  display: flex; align-items: center; gap: 0.5rem;
+  font-family: var(--mono); font-size: 0.7rem; text-transform: uppercase;
+  padding: 0.3rem 0.8rem; border-radius: 2px;
+  border: 1px solid var(--safe); color: var(--safe);
+  background: rgba(0,255,136,0.08);
+  letter-spacing: 0.1em;
+}
+.sys-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--safe); animation: blink 1.2s infinite;
+}
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.2} }
+
+/* ── MAIN LAYOUT ── */
+.main {
+  display: grid;
+  grid-template-columns: 1fr 380px;
+  gap: 0;
+  height: calc(100vh - 53px);
+}
+
+/* ── VIDEO AREA ── */
+.video-area {
+  position: relative;
+  background: #000;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.video-wrap {
+  position: relative;
+  width: 100%; height: 100%;
+}
+
+#main-video {
+  width: 100%; height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+/* ── CANVAS OVERLAYS ── */
+#overlay-canvas {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* ── LIVE HUD ── */
+.hud {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  display: flex;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  background: linear-gradient(to bottom, rgba(0,0,0,0.8), transparent);
+  pointer-events: none;
+}
+
+.hud-left {
+  display: flex; flex-direction: column; gap: 0.25rem;
+}
+
+.hud-badge {
+  font-family: var(--mono);
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+}
+
+.hud-value {
+  font-family: var(--mono);
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--safe);
+  text-shadow: 0 0 20px currentColor;
+  transition: color 0.3s;
+}
+
+.hud-metric {
+  display: flex; align-items: baseline; gap: 0.4rem;
+}
+
+.hud-right {
+  display: flex; flex-direction: column; align-items: flex-end; gap: 0.5rem;
+}
+
+.frame-info {
+  font-family: var(--mono); font-size: 0.65rem;
+  color: var(--muted); text-align: right;
+}
+
+/* ── ANOMALY METER (bottom of video) ── */
+.anomaly-bar-wrap {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  background: rgba(0,0,0,0.85);
+  border-top: 1px solid var(--border);
+  padding: 0.6rem 1rem;
+  pointer-events: none;
+}
+
+.anomaly-label {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 0.4rem;
+}
+
+.anomaly-label-text {
+  font-family: var(--mono); font-size: 0.65rem;
+  text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted);
+}
+
+.anomaly-pct {
+  font-family: var(--mono); font-size: 0.8rem;
+  font-weight: 700; color: var(--safe);
+  transition: color 0.3s;
+}
+
+.anomaly-track {
+  height: 6px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 999px;
+  overflow: hidden;
+  position: relative;
+}
+
+.anomaly-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--safe), var(--warn), var(--crit));
+  background-size: 300% 100%;
+  transition: width 0.4s ease, background-position 0.4s;
+  width: 0%;
+}
+
+/* Clip indicators */
+.clip-timeline {
+  display: flex;
+  gap: 3px;
+  margin-top: 0.5rem;
+}
+
+.clip-block {
+  flex: 1;
+  height: 4px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 999px;
+  transition: background 0.3s;
+}
+
+.clip-block.processing { background: var(--blue); animation: processing 0.8s infinite; }
+.clip-block.safe       { background: var(--safe); }
+.clip-block.warn       { background: var(--warn); }
+.clip-block.danger     { background: var(--danger); }
+.clip-block.critical   { background: var(--crit); animation: flash 0.5s infinite; }
+@keyframes processing  { 0%,100%{opacity:1} 50%{opacity:0.4} }
+@keyframes flash       { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+/* ── ALERT OVERLAY ── */
+.alert-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.alert-overlay.active { opacity: 1; }
+
+.alert-box {
+  border: 2px solid var(--crit);
+  background: rgba(255,23,68,0.12);
+  backdrop-filter: blur(8px);
+  padding: 1.5rem 2.5rem;
+  text-align: center;
+  animation: alert-pulse 1s infinite;
+}
+
+@keyframes alert-pulse {
+  0%,100% { border-color: var(--crit); box-shadow: 0 0 0 0 rgba(255,23,68,0.4); }
+  50%      { border-color: rgba(255,23,68,0.5); box-shadow: 0 0 40px rgba(255,23,68,0.3); }
+}
+
+.alert-title {
+  font-family: var(--mono); font-size: 1rem;
+  font-weight: 700; color: var(--crit); letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+.alert-sub {
+  font-family: var(--mono); font-size: 0.7rem;
+  color: rgba(255,23,68,0.7); margin-top: 0.4rem;
+  letter-spacing: 0.1em;
+}
+
+/* ── SIDE PANEL ── */
+.side-panel {
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.panel-section {
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.section-label {
+  font-family: var(--mono); font-size: 0.6rem;
+  text-transform: uppercase; letter-spacing: 0.15em;
+  color: var(--muted); margin-bottom: 0.75rem;
+}
+
+/* ── UPLOAD AREA ── */
+.upload-zone {
+  border: 1px dashed var(--border);
+  border-radius: 4px;
+  padding: 1.5rem 1rem;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: rgba(255,255,255,0.02);
+}
+
+.upload-zone:hover {
+  border-color: var(--blue);
+  background: rgba(0,170,255,0.05);
+}
+
+.upload-icon { font-size: 1.5rem; margin-bottom: 0.5rem; }
+.upload-text {
+  font-size: 0.8rem; color: var(--muted);
+  font-family: var(--mono);
+}
+.upload-text span { color: var(--blue); }
+
+input[type=file] { display: none; }
+
+/* ── LIVE SCORES ── */
+.score-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+.score-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.75rem;
+}
+
+.score-card-label {
+  font-family: var(--mono); font-size: 0.58rem;
+  text-transform: uppercase; letter-spacing: 0.1em;
+  color: var(--muted); margin-bottom: 0.3rem;
+}
+
+.score-card-value {
+  font-family: var(--mono); font-size: 1.3rem;
+  font-weight: 700; color: var(--safe);
+  transition: color 0.3s, text-shadow 0.3s;
+}
+
+.score-card-value.warn   { color: var(--warn);   text-shadow: 0 0 20px var(--warn); }
+.score-card-value.danger { color: var(--danger);  text-shadow: 0 0 20px var(--danger); }
+.score-card-value.crit   { color: var(--crit);    text-shadow: 0 0 20px var(--crit); animation: flash 0.5s infinite; }
+
+/* ── CLIP SCORES LIST ── */
+.clip-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.75rem 1.25rem;
+}
+
+.clip-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  animation: slide-in 0.3s ease;
+}
+
+@keyframes slide-in {
+  from { opacity: 0; transform: translateX(-10px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+.clip-num {
+  font-family: var(--mono); font-size: 0.6rem;
+  color: var(--muted); width: 24px; flex-shrink: 0;
+}
+
+.clip-bar-wrap {
+  flex: 1;
+  height: 4px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.clip-bar {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.5s ease;
+}
+
+.clip-score {
+  font-family: var(--mono); font-size: 0.65rem;
+  font-weight: 700; width: 40px; text-align: right;
+  flex-shrink: 0;
+}
+
+.clip-verdict {
+  font-size: 0.6rem; font-family: var(--mono);
+  width: 60px; text-align: right; flex-shrink: 0;
+}
+
+/* ── CONTROLS ── */
+.controls {
+  padding: 0.75rem 1.25rem;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.btn-analyze {
+  background: var(--blue);
+  border: none; border-radius: 3px;
+  padding: 0.6rem 1rem;
+  color: #000; font-family: var(--mono);
+  font-size: 0.72rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.1em;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.btn-analyze:hover { background: #33bbff; }
+.btn-analyze:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.btn-reset {
+  background: transparent;
+  border: 1px solid var(--border); border-radius: 3px;
+  padding: 0.5rem 1rem;
+  color: var(--muted); font-family: var(--mono);
+  font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.1em;
+  cursor: pointer; transition: all 0.2s;
+}
+.btn-reset:hover { border-color: var(--muted); color: var(--text); }
+
+.threshold-wrap {
+  display: flex; align-items: center; gap: 0.5rem;
+}
+.threshold-label {
+  font-family: var(--mono); font-size: 0.6rem;
+  color: var(--muted); text-transform: uppercase;
+  letter-spacing: 0.08em; white-space: nowrap;
+}
+input[type=range] {
+  flex: 1; accent-color: var(--blue); height: 3px;
+}
+.threshold-val {
+  font-family: var(--mono); font-size: 0.65rem;
+  color: var(--blue); width: 30px;
+}
+
+/* ── PROGRESS ── */
+.progress-wrap {
+  display: none;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.progress-wrap.active { display: flex; }
+.progress-text {
+  font-family: var(--mono); font-size: 0.62rem;
+  color: var(--muted); letter-spacing: 0.08em;
+}
+.progress-track {
+  height: 3px; background: var(--border); border-radius: 999px;
+}
+.progress-fill {
+  height: 100%; border-radius: 999px;
+  background: var(--blue);
+  transition: width 0.3s;
+  width: 0%;
+}
+
+/* ── EMPTY STATE ── */
+.empty-state {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 1rem; color: var(--muted);
+}
+.empty-icon { font-size: 3rem; opacity: 0.3; }
+.empty-text {
+  font-family: var(--mono); font-size: 0.75rem;
+  text-align: center; line-height: 1.6;
+  text-transform: uppercase; letter-spacing: 0.1em;
+}
+
+/* scrollbar */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-shield">🛡</div>
+    Stampede<span>Shield</span>
+  </div>
+  <div class="sys-status">
+    <div class="sys-dot"></div>
+    <span id="sys-label">AWAITING VIDEO</span>
+  </div>
+</header>
+
+<div class="main">
+
+  <!-- ── VIDEO AREA ── -->
+  <div class="video-area">
+
+    <!-- Empty state -->
+    <div class="empty-state" id="empty-state">
+      <div class="empty-icon">📹</div>
+      <div class="empty-text">Upload a video to begin<br>anomaly detection analysis</div>
+    </div>
+
+    <div class="video-wrap" id="video-wrap" style="display:none">
+      <video id="main-video" autoplay muted loop playsinline></video>
+      <canvas id="overlay-canvas"></canvas>
+
+      <!-- HUD -->
+      <div class="hud">
+        <div class="hud-left">
+          <div class="hud-metric">
+            <div>
+              <div class="hud-badge">Anomaly Score</div>
+              <div class="hud-value" id="hud-anomaly">0.000</div>
+            </div>
+          </div>
+          <div class="hud-metric" style="margin-top:0.5rem">
+            <div>
+              <div class="hud-badge">Crowd Count</div>
+              <div class="hud-value" id="hud-count" style="color:var(--blue)">—</div>
+            </div>
+          </div>
+        </div>
+        <div class="hud-right">
+          <div class="frame-info" id="frame-info">Frame: —</div>
+          <div class="frame-info" id="clip-info">Clip: —</div>
+          <div class="frame-info" id="time-info">Time: —</div>
+        </div>
+      </div>
+
+      <!-- Bottom anomaly bar -->
+      <div class="anomaly-bar-wrap">
+        <div class="anomaly-label">
+          <span class="anomaly-label-text">Anomaly Confidence</span>
+          <span class="anomaly-pct" id="bar-pct">0.0%</span>
+        </div>
+        <div class="anomaly-track">
+          <div class="anomaly-fill" id="anomaly-fill"></div>
+        </div>
+        <div class="clip-timeline" id="clip-timeline"></div>
+      </div>
+
+      <!-- Alert overlay -->
+      <div class="alert-overlay" id="alert-overlay">
+        <div class="alert-box">
+          <div class="alert-title">⚠ ANOMALY DETECTED</div>
+          <div class="alert-sub" id="alert-sub">High confidence anomalous behavior</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── SIDE PANEL ── -->
+  <div class="side-panel">
+
+    <!-- Upload -->
+    <div class="panel-section">
+      <div class="section-label">Video Source</div>
+      <div class="upload-zone" onclick="document.getElementById('vid-input').click()">
+        <div class="upload-icon">🎬</div>
+        <div class="upload-text"><span>Click to upload</span> video file<br>MP4 / AVI / MOV</div>
+      </div>
+      <input type="file" id="vid-input" accept="video/*" onchange="loadVideo(this)">
+    </div>
+
+    <!-- Live scores -->
+    <div class="panel-section">
+      <div class="section-label">Live Analysis</div>
+      <div class="score-grid">
+        <div class="score-card">
+          <div class="score-card-label">Anomaly Score</div>
+          <div class="score-card-value" id="sc-anomaly">0.000</div>
+        </div>
+        <div class="score-card">
+          <div class="score-card-label">Risk Level</div>
+          <div class="score-card-value" id="sc-risk">—</div>
+        </div>
+        <div class="score-card">
+          <div class="score-card-label">Clips Processed</div>
+          <div class="score-card-value" id="sc-clips" style="color:var(--blue)">0</div>
+        </div>
+        <div class="score-card">
+          <div class="score-card-label">Anomalies Found</div>
+          <div class="score-card-value" id="sc-found" style="color:var(--warn)">0</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="controls">
+      <div class="threshold-wrap">
+        <span class="threshold-label">Threshold</span>
+        <input type="range" id="threshold" min="10" max="90" value="35"
+               oninput="document.getElementById('thr-val').textContent=this.value+'%'">
+        <span class="threshold-val" id="thr-val">35%</span>
+      </div>
+      <button class="btn-analyze" id="btn-analyze" onclick="startAnalysis()" disabled>
+        ▶ Analyze Video
+      </button>
+      <button class="btn-reset" onclick="resetAll()">↺ Reset</button>
+      <div class="progress-wrap" id="progress-wrap">
+        <div class="progress-text" id="progress-text">Initializing...</div>
+        <div class="progress-track">
+          <div class="progress-fill" id="progress-fill"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Per-clip scores -->
+    <div class="section-label" style="padding:0.75rem 1.25rem 0.25rem; font-family:var(--mono); font-size:0.6rem; text-transform:uppercase; letter-spacing:0.15em; color:var(--muted)">
+      Per-Clip Scores
+    </div>
+    <div class="clip-list" id="clip-list">
+      <div style="color:var(--muted); font-family:var(--mono); font-size:0.65rem; text-transform:uppercase; letter-spacing:0.08em; padding:0.5rem 0">
+        No clips analyzed yet
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// ── STATE ─────────────────────────────────────────────────────
+let videoEl    = document.getElementById('main-video');
+let canvas     = document.getElementById('overlay-canvas');
+let ctx        = canvas.getContext('2d');
+let clipResults = [];
+let analyzing  = false;
+let animFrame  = null;
+let frameCount = 0;
+let currentAnomaly = 0;
+let totalAnomalies = 0;
+let clipBlocks = [];
+
+const FRAMES_PER_CLIP = 16;
+const FPS_TARGET      = 15; // process at this rate
+
+// ── VIDEO LOAD ────────────────────────────────────────────────
+function loadVideo(input) {
+  const file = input.files[0];
+  if (!file) return;
+
+  const url = URL.createObjectURL(file);
+  videoEl.src = url;
+  videoEl.load();
+
+  document.getElementById('empty-state').style.display = 'none';
+  document.getElementById('video-wrap').style.display  = 'block';
+  document.getElementById('btn-analyze').disabled = false;
+  document.getElementById('sys-label').textContent = 'VIDEO LOADED';
+
+  videoEl.addEventListener('loadedmetadata', () => {
+    resizeCanvas();
+    document.getElementById('time-info').textContent =
+      `Duration: ${videoEl.duration.toFixed(1)}s`;
+    buildTimeline();
+  });
+
+  videoEl.play();
+  startRenderLoop();
+}
+
+function resizeCanvas() {
+  canvas.width  = videoEl.offsetWidth  || videoEl.clientWidth;
+  canvas.height = videoEl.offsetHeight || videoEl.clientHeight;
+}
+
+// ── TIMELINE ──────────────────────────────────────────────────
+function buildTimeline() {
+  const duration    = videoEl.duration;
+  const totalFrames = Math.floor(duration * FPS_TARGET);
+  const totalClips  = Math.floor(totalFrames / FRAMES_PER_CLIP);
+  const tl          = document.getElementById('clip-timeline');
+  tl.innerHTML = '';
+  clipBlocks = [];
+
+  for (let i = 0; i < Math.min(totalClips, 60); i++) {
+    const b = document.createElement('div');
+    b.className = 'clip-block';
+    tl.appendChild(b);
+    clipBlocks.push(b);
+  }
+}
+
+// ── RENDER LOOP ───────────────────────────────────────────────
+function startRenderLoop() {
+  if (animFrame) cancelAnimationFrame(animFrame);
+
+  function render() {
+    resizeCanvas();
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (!videoEl.paused && !videoEl.ended) {
+      frameCount++;
+      drawOverlay();
+      updateHUD();
+    }
+    animFrame = requestAnimationFrame(render);
+  }
+  render();
+}
+
+// ── DRAW OVERLAY ──────────────────────────────────────────────
+function drawOverlay() {
+  const w = canvas.width, h = canvas.height;
+  const score = currentAnomaly;
+
+  // Corner brackets
+  const blen = 30, bw = 2;
+  ctx.strokeStyle = score > 0.65 ? `rgba(255,23,68,${0.6+score*0.4})` :
+                    score > 0.35 ? `rgba(255,100,0,0.7)` :
+                                   `rgba(0,255,136,0.4)`;
+  ctx.lineWidth = bw;
+
+  // Top-left
+  ctx.beginPath(); ctx.moveTo(10,10+blen); ctx.lineTo(10,10); ctx.lineTo(10+blen,10); ctx.stroke();
+  // Top-right
+  ctx.beginPath(); ctx.moveTo(w-10-blen,10); ctx.lineTo(w-10,10); ctx.lineTo(w-10,10+blen); ctx.stroke();
+  // Bottom-left
+  ctx.beginPath(); ctx.moveTo(10,h-10-blen); ctx.lineTo(10,h-10); ctx.lineTo(10+blen,h-10); ctx.stroke();
+  // Bottom-right
+  ctx.beginPath(); ctx.moveTo(w-10-blen,h-10); ctx.lineTo(w-10,h-10); ctx.lineTo(w-10,h-10-blen); ctx.stroke();
+
+  // Grid lines (tactical look)
+  ctx.strokeStyle = `rgba(0,170,255,${0.03 + score*0.05})`;
+  ctx.lineWidth = 0.5;
+  const cols = 8, rows = 6;
+  for (let i = 1; i < cols; i++) {
+    ctx.beginPath();
+    ctx.moveTo(w/cols*i, 0); ctx.lineTo(w/cols*i, h);
+    ctx.stroke();
+  }
+  for (let i = 1; i < rows; i++) {
+    ctx.beginPath();
+    ctx.moveTo(0, h/rows*i); ctx.lineTo(w, h/rows*i);
+    ctx.stroke();
+  }
+
+  // High anomaly — red vignette
+  if (score > 0.5) {
+    const alpha = (score - 0.5) * 0.6;
+    const gradient = ctx.createRadialGradient(w/2, h/2, h*0.3, w/2, h/2, h*0.8);
+    gradient.addColorStop(0, 'rgba(255,23,68,0)');
+    gradient.addColorStop(1, `rgba(255,23,68,${alpha})`);
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, w, h);
+  }
+
+  // Anomaly score watermark
+  if (score > 0.1) {
+    ctx.font = `bold ${Math.floor(w*0.06)}px 'Space Mono', monospace`;
+    ctx.fillStyle = `rgba(255,23,68,${score * 0.15})`;
+    ctx.textAlign = 'center';
+    ctx.fillText(`ANOMALY ${(score*100).toFixed(0)}%`, w/2, h/2);
+    ctx.textAlign = 'left';
+  }
+
+  // Scanning line
+  const scanY = ((Date.now() / 3000) % 1) * h;
+  const scanGrad = ctx.createLinearGradient(0, scanY-20, 0, scanY+20);
+  scanGrad.addColorStop(0, 'transparent');
+  scanGrad.addColorStop(0.5, `rgba(0,170,255,${0.08 + score*0.1})`);
+  scanGrad.addColorStop(1, 'transparent');
+  ctx.fillStyle = scanGrad;
+  ctx.fillRect(0, scanY-20, w, 40);
+}
+
+// ── UPDATE HUD ────────────────────────────────────────────────
+function updateHUD() {
+  const score = currentAnomaly;
+  const pct   = (score * 100).toFixed(1);
+
+  // Anomaly bar
+  document.getElementById('anomaly-fill').style.width            = `${pct}%`;
+  document.getElementById('anomaly-fill').style.backgroundPosition = `${100 - pct}% 0`;
+  document.getElementById('bar-pct').textContent                 = `${pct}%`;
+  document.getElementById('bar-pct').style.color                 = scoreColor(score);
+
+  // HUD values
+  document.getElementById('hud-anomaly').textContent  = score.toFixed(3);
+  document.getElementById('hud-anomaly').style.color  = scoreColor(score);
+  document.getElementById('frame-info').textContent   = `Frame: ${frameCount}`;
+
+  if (!videoEl.paused) {
+    document.getElementById('clip-info').textContent =
+      `Clip: ${Math.floor(frameCount / FRAMES_PER_CLIP) + 1}`;
+    const t = videoEl.currentTime;
+    document.getElementById('time-info').textContent =
+      `${t.toFixed(1)}s / ${(videoEl.duration||0).toFixed(1)}s`;
+  }
+
+  // Score cards
+  document.getElementById('sc-anomaly').textContent = score.toFixed(3);
+  document.getElementById('sc-anomaly').className = 'score-card-value ' + riskClass(score);
+  document.getElementById('sc-risk').textContent  = riskLabel(score);
+  document.getElementById('sc-risk').className   = 'score-card-value ' + riskClass(score);
+
+  // Alert overlay
+  const alertEl = document.getElementById('alert-overlay');
+  if (score > 0.65) {
+    alertEl.classList.add('active');
+    document.getElementById('alert-sub').textContent =
+      `Score: ${score.toFixed(3)} — ${riskLabel(score)}`;
+    document.getElementById('sys-label').textContent = '⚠ ANOMALY DETECTED';
+  } else {
+    alertEl.classList.remove('active');
+    if (!analyzing)
+      document.getElementById('sys-label').textContent = 'ANALYZING';
+  }
+}
+
+// ── ANALYSIS (simulates frame-by-frame ViT processing) ────────
+async function startAnalysis() {
+  if (analyzing) return;
+  analyzing = true;
+  clipResults = [];
+  totalAnomalies = 0;
+  document.getElementById('clip-list').innerHTML = '';
+  document.getElementById('sc-clips').textContent = '0';
+  document.getElementById('sc-found').textContent = '0';
+  document.getElementById('btn-analyze').disabled = true;
+  document.getElementById('progress-wrap').classList.add('active');
+  document.getElementById('sys-label').textContent = 'ANALYZING';
+
+  const threshold = parseInt(document.getElementById('threshold').value) / 100;
+  const duration  = videoEl.duration;
+
+  if (!duration || isNaN(duration)) {
+    alert('Video not ready. Please wait for it to load.');
+    analyzing = false;
+    document.getElementById('btn-analyze').disabled = false;
+    return;
+  }
+
+  videoEl.currentTime = 0;
+  await new Promise(r => setTimeout(r, 200));
+  videoEl.play();
+
+  const clipDuration = FRAMES_PER_CLIP / FPS_TARGET;
+  const totalClips   = Math.floor(duration / clipDuration);
+  let   clipIndex    = 0;
+
+  // Process each clip sequentially
+  const processNextClip = async () => {
+    if (clipIndex >= totalClips || !analyzing) {
+      finishAnalysis();
+      return;
+    }
+
+    const clipStart = clipIndex * clipDuration;
+    videoEl.currentTime = clipStart;
+
+    // Update progress
+    const pct = Math.round((clipIndex / totalClips) * 100);
+    document.getElementById('progress-fill').style.width = `${pct}%`;
+    document.getElementById('progress-text').textContent =
+      `Processing clip ${clipIndex+1} / ${totalClips}`;
+
+    // Mark timeline block as processing
+    if (clipBlocks[clipIndex]) {
+      clipBlocks[clipIndex].className = 'clip-block processing';
+    }
+
+    // Simulate ViT inference delay (would be real API call in production)
+    await new Promise(r => setTimeout(r, 300 + Math.random()*200));
+
+    // Simulate score — in real system this calls your Flask API
+    const score = await simulateViTScore(clipStart, duration, clipIndex, totalClips);
+    currentAnomaly = score;
+
+    // Color timeline block
+    if (clipBlocks[clipIndex]) {
+      clipBlocks[clipIndex].className = 'clip-block ' +
+        (score > 0.75 ? 'critical' : score > 0.55 ? 'danger' : score > 0.35 ? 'warn' : 'safe');
+    }
+
+    // Add to list
+    const isAnom = score > threshold;
+    if (isAnom) totalAnomalies++;
+
+    document.getElementById('sc-clips').textContent = clipIndex + 1;
+    document.getElementById('sc-found').textContent = totalAnomalies;
+
+    addClipToList(clipIndex + 1, score, threshold, clipStart);
+
+    clipResults.push({ clip: clipIndex+1, score, time: clipStart });
+    clipIndex++;
+
+    setTimeout(processNextClip, 100);
+  };
+
+  processNextClip();
+}
+
+// Real integration point — replace with actual Flask API call:
+// const res = await fetch('/api/analyze_clip', { method:'POST', body: formData });
+// const data = await res.json();
+// return data.anomaly_score;
+async function simulateViTScore(clipStart, duration, clipIndex, totalClips) {
+  // This simulates realistic score patterns
+  // Replace entire function body with real API call in production
+  const progress = clipIndex / totalClips;
+  const base = Math.random() * 0.2;
+
+  // Simulate anomaly spike pattern
+  const spikePeak = 0.6 + Math.random() * 0.3;
+  const spikeWidth = 0.08 + Math.random() * 0.06;
+  const spikePos = 0.3 + Math.random() * 0.5;
+
+  const spike = Math.exp(-Math.pow(progress - spikePos, 2) / (2 * spikeWidth * spikeWidth));
+  return Math.min(base + spike * spikePeak, 0.99);
+}
+
+function addClipToList(clipNum, score, threshold, time) {
+  const list  = document.getElementById('clip-list');
+  const color = scoreColor(score);
+  const isAnom = score > threshold;
+
+  // Remove placeholder
+  const placeholder = list.querySelector('div[style]');
+  if (placeholder) placeholder.remove();
+
+  const item = document.createElement('div');
+  item.className = 'clip-item';
+  item.innerHTML = `
+    <div class="clip-num">#${String(clipNum).padStart(2,'0')}</div>
+    <div class="clip-bar-wrap">
+      <div class="clip-bar" style="width:${score*100}%;background:${color}"></div>
+    </div>
+    <div class="clip-score" style="color:${color}">${score.toFixed(3)}</div>
+    <div class="clip-verdict" style="color:${color}">${isAnom ? '⚠ ANOM' : '✓ NORM'}</div>
+  `;
+  // Keep latest at top
+  list.insertBefore(item, list.firstChild);
+
+  // Keep max 50 items
+  while (list.children.length > 50) list.removeChild(list.lastChild);
+}
+
+function finishAnalysis() {
+  analyzing = false;
+  document.getElementById('progress-wrap').classList.remove('active');
+  document.getElementById('btn-analyze').disabled = false;
+
+  const maxScore = clipResults.length > 0
+    ? Math.max(...clipResults.map(r => r.score)) : 0;
+  currentAnomaly = maxScore;
+
+  document.getElementById('sys-label').textContent =
+    maxScore > 0.65 ? '⚠ ANOMALY DETECTED' : '✓ ANALYSIS COMPLETE';
+  document.getElementById('progress-text').textContent =
+    `Done — ${totalAnomalies} anomalies in ${clipResults.length} clips`;
+}
+
+function resetAll() {
+  analyzing = false;
+  clipResults = [];
+  totalAnomalies = 0;
+  currentAnomaly = 0;
+  frameCount = 0;
+  clipBlocks = [];
+
+  document.getElementById('clip-list').innerHTML =
+    '<div style="color:var(--muted);font-family:var(--mono);font-size:0.65rem;text-transform:uppercase;letter-spacing:0.08em;padding:0.5rem 0">No clips analyzed yet</div>';
+  document.getElementById('sc-clips').textContent = '0';
+  document.getElementById('sc-found').textContent = '0';
+  document.getElementById('sc-anomaly').textContent = '0.000';
+  document.getElementById('sc-risk').textContent = '—';
+  document.getElementById('hud-anomaly').textContent = '0.000';
+  document.getElementById('bar-pct').textContent = '0.0%';
+  document.getElementById('anomaly-fill').style.width = '0%';
+  document.getElementById('clip-timeline').innerHTML = '';
+  document.getElementById('alert-overlay').classList.remove('active');
+  document.getElementById('sys-label').textContent = 'AWAITING VIDEO';
+  document.getElementById('progress-wrap').classList.remove('active');
+
+  if (videoEl.src) {
+    videoEl.currentTime = 0;
+    videoEl.play();
+  }
+}
+
+// ── HELPERS ───────────────────────────────────────────────────
+function scoreColor(s) {
+  if (s > 0.75) return '#ff1744';
+  if (s > 0.55) return '#ff6600';
+  if (s > 0.35) return '#ffcc00';
+  return '#00ff88';
+}
+
+function riskClass(s) {
+  if (s > 0.75) return 'crit';
+  if (s > 0.55) return 'danger';
+  if (s > 0.35) return 'warn';
+  return '';
+}
+
+function riskLabel(s) {
+  if (s > 0.75) return 'CRITICAL';
+  if (s > 0.55) return 'DANGER';
+  if (s > 0.35) return 'CAUTION';
+  return 'NORMAL';
+}
+
+// ── REAL API INTEGRATION ──────────────────────────────────────
+// To connect to your actual Flask backend, replace simulateViTScore with:
+//
+// async function getRealViTScore(videoFile, clipStart) {
+//   const formData = new FormData();
+//   formData.append('video', videoFile);
+//   formData.append('start_time', clipStart);
+//   formData.append('num_frames', FRAMES_PER_CLIP);
+//
+//   const res = await fetch('http://localhost:5000/api/analyze_clip', {
+//     method: 'POST',
+//     body: formData
+//   });
+//   const data = await res.json();
+//   return data.anomaly_score;  // 0-1 from your ViT model
+// }
+
+window.addEventListener('resize', resizeCanvas);
+</script>
+</body>
+</html>

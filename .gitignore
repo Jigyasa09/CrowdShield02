@@ -1,0 +1,58 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# Virtual Environment
+venv/
+env/
+ENV/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Model files (too large for GitHub)
+*.pt
+*.pth
+*.h5
+*.keras
+*.onnx
+*.bin
+
+# Dataset files
+*.jpg
+*.png
+*.jpeg
+*.mp4
+*.avi
+*.npy
+
+# Uploads
+uploads/
+*.jpg
+*.png
+
+# Logs
+*.log
+logs/
+
+# Environment variables
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Kaggle
+.kaggle/
